@@ -3,6 +3,15 @@
 Detects rising Google Search Console queries and measures how quickly your newsroom covers them.
 
 
+## Warehouse: Snowflake (production) or BigQuery (untested mirror)
+
+The pipeline ships in two flavors:
+
+- **Snowflake** — `pipeline.py`, `gsc_pull.py`, `load_gsc_csv.py`. The production-tested path. Uses Snowflake Cortex `COMPLETE` for the LLM classification step.
+- **BigQuery** — `pipeline_bigquery.py`, `gsc_pull_bigquery.py`, `load_gsc_csv_bigquery.py`. **Untested mirror** provided as a starting point for BQ users. Uses BigQuery ML `ML.GENERATE_TEXT` with a remote Gemini model. Has not been run end-to-end. Expect to debug.
+
+The rest of this README covers the Snowflake setup. Skip to [BigQuery setup](#bigquery-setup-untested) for the BQ path.
+
 ## What it does
 
 1. Pulls daily search query impressions from Google Search Console
@@ -169,6 +178,87 @@ Then add `python pipeline.py` to cron, Airflow, or whatever scheduler your org u
 **Publication context:** Set `PUBLICATION_NAME` and `PUBLICATION_LOCATION` in `.env`. These feed into the Cortex prompt to improve classification accuracy — "The Star Tribune is a Minnesota newspaper" resolves ambiguity that "a newspaper" cannot.
 
 **Evergreen sections:** Update `EVERGREEN_SECTIONS` at the top of `pipeline.py` to match your section names. Sections like Obituaries, Games, and Weather are excluded from gap analysis since they're not news-driven.
+
+## BigQuery setup (untested)
+
+> The BigQuery scripts (`pipeline_bigquery.py`, `gsc_pull_bigquery.py`, `load_gsc_csv_bigquery.py`) mirror the Snowflake implementation but have not been run end-to-end. Treat this section as a starting point, not a finished how-to.
+
+### Requirements
+
+- Python 3.11+ with the BigQuery extras installed (`pip install -r requirements.txt` covers it)
+- A GCP project with BigQuery and Vertex AI enabled
+- A BigQuery dataset (the pipeline will `CREATE IF NOT EXISTS`)
+- Your CMS articles in a BigQuery table (see `load_arc()` in `pipeline_bigquery.py`)
+- For the LLM step: a BigQuery `CONNECTION` and remote model pointed at Gemini (one-time setup, below). Without these, the pipeline falls back to pure Jaccard matching.
+
+### Authentication
+
+Set up [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) for interactive runs:
+
+```bash
+gcloud auth application-default login
+```
+
+For unattended runs, set `GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json` and grant the service account `BigQuery Data Editor`, `BigQuery Job User`, and (for the LLM step) `Vertex AI User`.
+
+### One-time setup: BigQuery Connection + Remote Gemini model
+
+`ML.GENERATE_TEXT` requires a remote model that points through a BigQuery `CONNECTION` to Vertex AI. Run once per project:
+
+```bash
+# 1. Create the connection (or use an existing one)
+bq mk --connection \
+    --location=US \
+    --project_id=your-gcp-project \
+    --connection_type=CLOUD_RESOURCE \
+    gemini_conn
+
+# 2. Grant the connection's service account the Vertex AI User role
+#    (find the SA email in the bq mk output, then grant via IAM)
+
+# 3. Create the remote model in BigQuery SQL
+bq query --use_legacy_sql=false "
+CREATE OR REPLACE MODEL \`your-gcp-project.trend_tracker.gemini_model\`
+REMOTE WITH CONNECTION \`your-gcp-project.us.gemini_conn\`
+OPTIONS (endpoint = 'gemini-1.5-flash')
+"
+```
+
+Then point `BQ_GEMINI_MODEL` in `.env` at `your-gcp-project.trend_tracker.gemini_model`.
+
+### Configure your `.env`
+
+In addition to the Snowflake/GSC variables already documented, set:
+
+```bash
+GCP_PROJECT=your-gcp-project
+BQ_LOCATION=US
+BQ_DATASET=trend_tracker
+BQ_ARC_TABLE=your-gcp-project.your_dataset.your_articles_table
+BQ_GEMINI_MODEL=your-gcp-project.trend_tracker.gemini_model
+```
+
+### Load GSC data and run
+
+```bash
+# Backfill from the API
+python gsc_pull_bigquery.py --backfill
+
+# Or seed from a CSV export
+python load_gsc_csv_bigquery.py \
+  --queries /path/to/Queries.csv \
+  --chart   /path/to/Chart.csv
+
+# Run the pipeline
+python pipeline_bigquery.py
+```
+
+### Things likely to need debugging
+
+- **Authentication boundaries.** GSC uses its own service account file (`GSC_SERVICE_ACCOUNT_FILE`). BigQuery uses ADC or `GOOGLE_APPLICATION_CREDENTIALS`. Two different credentials, two different scopes.
+- **Model endpoint name.** `gemini-1.5-flash` works at time of writing; check the [supported models list](https://cloud.google.com/bigquery/docs/generate-text) before assuming.
+- **Prompt formatting.** The pipeline builds prompts inline as SQL string literals. Headline/section escaping is best-effort. If you see prompt-injection-style failures, parameterize.
+- **Quota.** Vertex AI per-minute quotas apply to `ML.GENERATE_TEXT`. At ~30 trending queries per run with a handful of candidates each, you're well under default limits — but a large backfill could trip them.
 
 ## License
 

@@ -106,8 +106,8 @@ SNOWFLAKE_ROLE=                           # optional
 ARC_TABLE=ARC_ARTICLES                    # Snowflake table with your published articles
 
 # Publication context (used in the Cortex prompt for better classification)
-PUBLICATION_NAME=The Star Tribune
-PUBLICATION_LOCATION=Minnesota            # city, state, or region — leave blank if national
+PUBLICATION_NAME=Your Publication Name
+PUBLICATION_LOCATION=Your City or Region  # leave blank if national
 
 # GSC (only needed for gsc_pull.py API path)
 GSC_SERVICE_ACCOUNT_FILE=/path/to/service_account.json
@@ -173,9 +173,9 @@ Then add `python pipeline.py` to cron, Airflow, or whatever scheduler your org u
 
 ## Adapting for your newsroom
 
-**CMS table:** The only Star Tribune-specific piece is `load_arc()` in `pipeline.py`, which assumes Arc Publishing column names. If your articles are in Snowflake, point `ARC_TABLE` in `.env` at your table and adjust the column names in `load_arc()` to match your schema. Required fields are documented in that function.
+**CMS table:** The CMS-specific piece is `load_arc()` in `pipeline.py`, which assumes Arc Publishing column names. If your articles are in Snowflake, point `ARC_TABLE` in `.env` at your table and adjust the column names in `load_arc()` to match your schema. Required fields are documented in that function.
 
-**Publication context:** Set `PUBLICATION_NAME` and `PUBLICATION_LOCATION` in `.env`. These feed into the Cortex prompt to improve classification accuracy — "The Star Tribune is a Minnesota newspaper" resolves ambiguity that "a newspaper" cannot.
+**Publication context:** Set `PUBLICATION_NAME` and `PUBLICATION_LOCATION` in `.env`. These feed into the Cortex prompt to improve classification accuracy — a prompt like "The Daily Bugle is a Chicago newspaper" resolves ambiguity that "a newspaper" alone cannot.
 
 **Evergreen sections:** Update `EVERGREEN_SECTIONS` at the top of `pipeline.py` to match your section names. Sections like Obituaries, Games, and Weather are excluded from gap analysis since they're not news-driven.
 

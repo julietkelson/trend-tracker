@@ -2,7 +2,6 @@
 
 Detects rising Google Search Console queries and measures how quickly your newsroom covers them.
 
-Built at the Star Tribune.
 
 ## What it does
 
